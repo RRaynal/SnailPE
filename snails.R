@@ -7,9 +7,6 @@ library(lme4)
 library(lmerTest)
 library(lsmeans)
 library(emmeans)
-
-#Two way anova packages 
-
 library(ggplot2)
 library(ggpubr)
 library(tidyverse)
@@ -19,8 +16,8 @@ library(multcomp)
 library(MASS)
 
 #Load data
-F0<-read.csv("~/Dropbox/PHD/Snails/Analysis/F0.csv")
-F1<-read.csv("~/Dropbox/PHD/Snails/Analysis/F1.csv")
+F0<-read.csv("F0.csv")
+F1<-read.csv("F1.csv")
 
 
 F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
@@ -28,7 +25,6 @@ F0$p.treat <- as.factor(F0$p.treat)
 
 
 #some grouped plots for data exploration
-
 
 # Scatter plot by group
 #total no. of eggs x total mass area
@@ -81,64 +77,66 @@ ggplot(data=cdata, aes(x=clutch, y=number, group=P.ID)) +
 
 ##### Run the models #####
 
-#Does egg total depend on the parental environment, or a result of snail size?
+#But first z transform the volume of snail pair within treatment groups
 
-eggtotalm <- lm(totalegg ~ l.size + p.treat, data = F0)
-summary(eggtotalm)
-anova(eggtotalm)
-# P= 0.09 on treatment 
+# Function to perform Z-transform within groups
+z_transform_within_group <- function(x) {
+  mean_x <- mean(x)
+  sd_x <- sd(x)
+  z_transformed_x <- (x - mean_x) / sd_x
+  return(z_transformed_x)
+}
 
-## a model including the new volume measurement
-eggtotal2 <- lm(totalegg ~ Volume_conesum + p.treat, data = F0)
-summary(eggtotal2)
-anova(eggtotal2)
+# Apply Z-transform within groups using dplyr
+snail_volumez <- F0 %>%
+  group_by(p.treat) %>%
+  mutate(Volume_conesum = z_transform_within_group(Volume_conesum))
 
-# Is number of clutches a result of the treatment, or the size of snail? 
-clutchesm <- glm(clutches ~ l.size + p.treat, family=poisson(link="log"), data = F0)
-summary(clutchesm)
-anova(clutchesm)
+
+
+## Run models without any covariates to start
+totaleggmod <- lm(totalegg ~ p.treat, data = F0)
+summary(totaleggmod)
+anova(totaleggmod)
 #nothing
 
-## Same model but with the volume measurement
-clutches2 <- glm(clutches ~ Volume_conesum + p.treat, family=poisson(link="log"), data = F0)
-summary(clutches2)
-anova(clutches2)
 
-##check residuals
-library(mvabund)
-clutchesm2 <- manyglm(clutches ~ l.size + factor(p.treat), family=poisson(link="log"), data = F0)
-plot(clutchesm2)
-anova(clutchesm2)
+# Is number of clutches a result of the treatment
+clutchesm <- glm(clutches ~ p.treat, family=poisson(link="log"), data = F0)
+summary(clutchesm)
+#nothing
 
 
 #Does treatment influence the egg size of snail?
-ave.eggsizem <- lm(ave.eggsize ~ l.size + p.treat, data = F0)
+ave.eggsizem <- lm(ave.eggsize ~p.treat, data = F0)
 summary(ave.eggsizem)
 anova(ave.eggsizem)
 #nothing
 
-## Same model but with the new volume size measure
-ave.eggsize2 <- lm(ave.eggsize ~ Volume_conesum + p.treat, data = F0)
-summary(ave.eggsize2)
-anova(ave.eggsize2)
-
-
 
 #Does treatment influence egg size standard dev?
-ave.eggsizesdm <- lm(ave.eggSD ~ l.size + p.treat, data = F0)
+ave.eggsizesdm <- lm(ave.eggSD ~ p.treat, data = F0)
 summary(ave.eggsizesdm)
 anova(ave.eggsizesdm)
 #nothing
 
-## Same model but with the new volume size measure
-ave.eggsizesd2 <- lm(ave.eggSD ~ Volume_conesum + p.treat, data = F0)
-summary(ave.eggsizesd2)
-anova(ave.eggsizesd2)
 
 #Does treatment influence average clutch size?
-ave.clutchm <- lm(ave.clutch ~ l.size + p.treat, data = F0)
+ave.clutchm <- lm(ave.clutch ~ p.treat, data = F0)
 summary(ave.clutchm)
 anova(ave.clutchm)
+# Parental treatment has a signficant p-value (P=0.011)
+
+#Test to see whether snail size or parental treatment is causing the difference
+#include my z transformed volume variable in the clutch model
+ave.clutchz <- lm(ave.clutch ~ Volume_conesum + p.treat, data = snail_volumez)
+summary(ave.clutchz)
+anova(ave.clutchz)
+## parental treatment is still significant, volume is not.
+
+emmeans(ave.clutchz, list(pairwise ~ p.treat), adjust = "tukey")
+
+
 
 residuals <- residuals(ave.clutchm)
 plot(fitted(ave.clutchm), residuals,
@@ -147,59 +145,21 @@ plot(fitted(ave.clutchm), residuals,
      main = "Residual Plot")
 
 
-## Yes. p.treat p=0.0011
-ave.clutch.av <- aov(ave.clutchm)
-TukeyHSD(ave.clutch.av)
-
-
-
-
-## Same model but with the new volume size measure
-ave.clutch2 <- lm(ave.clutch ~ Volume_conesum + p.treat, data = F0)
-summary(ave.clutch2)
-anova(ave.clutch2)
-## Volume is significant and average clutch size is close, so we will do AICc selection on single models to see which is best
-
-## AICc 
-ave.clutchvol <- lm(ave.clutch ~ Volume_conesum, data = F0)
-ave.clutchtreat <- lm(ave.clutch ~ p.treat, data = F0)
-
-AIC(ave.clutchvol)
-AIC(ave.clutchtreat)
-
-## AIC for treatment is better.
-
-
 #Does treatment influence latency to lay eggs?
-latencym <- lm(egglatency ~ l.size + p.treat, data = F0)
+latencym <- lm(egglatency ~ p.treat, data = F0)
 summary(latencym)
 anova(latencym)
 #nothing
 
+nobs(latencym)
 
-## Same model but with the new volume size measure
-latency2 <- lm(egglatency ~ Volume_conesum + p.treat, data = F0)
-summary(latency2)
-anova(latency2)
 
-lsize <- lm(l.size ~ p.treat, data=F0)
-anova(lsize)
-
-ssize <- lm(s.size ~ p.treat, data=F0)
-anova(ssize)
-
-volume <- lm(Volume_conesum ~ p.treat, data=F0)
-anova(volume)
-
-volume2 <- aov(volume)
-TukeyHSD(volume2, "p.treat")
 
 #Does treatment influence egg mass size?
-eggmassm <- lm(ave.mass ~ Volume_conesum + p.treat, data = F0)
+eggmassm <- lm(ave.mass ~ p.treat, data = F0)
 summary(eggmassm)
 anova(eggmassm)
 #nothing
-
 
 
 ##Analysis for F1 snails, does parental treatmentxdevelopmental treatment effect F1 traits such as size, 
@@ -207,24 +167,39 @@ anova(eggmassm)
 
 hist(F1$survival)
 
-survivalmod <- lmer(survival ~ p.treat*o.treat + (1|parent), data = F1, REML=T)
+survivalmod <- lm(survival ~ p.treat*o.treat, data = F1)
 summary(survivalmod)
 anova(survivalmod)
 #no significant moderators 
+nobs(survivalmod)
 
 
-IDmod <- lmer(ID ~ p.treat*o.treat  + (1|parent), data = F1, REML=T)
+IDmod <- lm(ID ~ p.treat*o.treat, data = F1)
 summary(IDmod)
 anova(IDmod)
 #Offspring treatment significant, pvalue =tiny
+
+IDmod <- lmer(ID ~ p.treat*o.treat + (1|parent), data = F1)
+summary(IDmod)
+anova(IDmod)
+
+
+
 emmeans(IDmod, list(pairwise ~ o.treat), adjust = "tukey")
 
 
-sizemod <- lmer(size.ave ~ p.treat + o.treat + ave.eggsize + (1|parent), data = F1)
+sizemod <- lmer(size.ave ~ ave.eggsize + p.treat*o.treat + (1|parent), data = F1)
 summary(sizemod)
 anova(sizemod)
 #singular fit
 #offspring treatment significant P=0.0015
+
+#add in egg size to make sure it is not a contributor to the difference seen
+sizemod <- lmer(size.ave ~ ave.eggsize + p.treat*o.treat + (1|parent), data = F1)
+summary(sizemod)
+anova(sizemod)
+
+
 emmeans(sizemod, list(pairwise ~ o.treat), adjust = "tukey")
 
 ## AICc 
