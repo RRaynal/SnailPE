@@ -14,6 +14,7 @@ library(broom)
 library(AICcmodavg)
 library(multcomp)
 library(MASS)
+library(MCMCglmm)
 
 #Load data
 F0<-read.csv("F0.csv")
@@ -23,10 +24,11 @@ F1<-read.csv("F1.csv")
 F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
 F0$p.treat <- as.factor(F0$p.treat)
 
+#############################
+# plots for data exploration #
+#############################
 
-#some grouped plots for data exploration
-
-# Scatter plot by group
+#Scatter plot by group
 #total no. of eggs x total mass area
 massegg <- F0 %>%
 ggplot(aes(x = totalegg, y = totalmass, color = p.treat)) +
@@ -62,7 +64,6 @@ summary(simple)
 ## even without taking parental temperature into account, there is no relationship between egg size and total number of eggs
   
 
-
 #Make a ladder plot to show how egg production goes over number of clutches
 #load data
 cdata<-read.csv("~/Dropbox/PHD/Snails/Analysis/clutchd.csv")
@@ -75,7 +76,11 @@ ggplot(data=cdata, aes(x=clutch, y=number, group=P.ID)) +
   labs(x="Clutch number", title= "Number of eggs per clutch") +
   theme_bw()
 
+
+
+########################
 ##### Run the models #####
+########################
 
 #But first z transform the volume of snail pair within treatment groups
 
@@ -92,50 +97,41 @@ snail_volumez <- F0 %>%
   group_by(p.treat) %>%
   mutate(Volume_conesum = z_transform_within_group(Volume_conesum))
 
-
+###############################
+## Parental fecundity models ##
+###############################
 
 ## Run models without any covariates to start
-totaleggmod <- lm(totalegg ~ p.treat, data = F0)
+
+# Total number of eggs
+totaleggmod <- lm(totalegg ~ Volume_conesum + p.treat, data = snail_volumez)
 summary(totaleggmod)
 anova(totaleggmod)
 #nothing
 
 
-# Is number of clutches a result of the treatment
-clutchesm <- glm(clutches ~ p.treat, family=poisson(link="log"), data = F0)
-summary(clutchesm)
-#nothing
-
-
-#Does treatment influence the egg size of snail?
-ave.eggsizem <- lm(ave.eggsize ~p.treat, data = F0)
+# Egg size
+ave.eggsizem <- lm(ave.eggsize ~ Volume_conesum + p.treat, data = snail_volumez)
 summary(ave.eggsizem)
 anova(ave.eggsizem)
 #nothing
 
 
-#Does treatment influence egg size standard dev?
-ave.eggsizesdm <- lm(ave.eggSD ~ p.treat, data = F0)
+# Egg size standard deviation
+ave.eggsizesdm <- lm(ave.eggSD ~ Volume_conesum + p.treat, data = snail_volumez)
 summary(ave.eggsizesdm)
 anova(ave.eggsizesdm)
 #nothing
 
 
-#Does treatment influence average clutch size?
-ave.clutchm <- lm(ave.clutch ~ p.treat, data = F0)
+# Clutch size
+ave.clutchm <- lm(ave.clutch ~ Volume_conesum + p.treat, data = snail_volumez)
 summary(ave.clutchm)
 anova(ave.clutchm)
 # Parental treatment has a signficant p-value (P=0.011)
 
-#Test to see whether snail size or parental treatment is causing the difference
-#include my z transformed volume variable in the clutch model
-ave.clutchz <- lm(ave.clutch ~ Volume_conesum + p.treat, data = snail_volumez)
-summary(ave.clutchz)
-anova(ave.clutchz)
-## parental treatment is still significant, volume is not.
-
+#Post hoc test
 emmeans(ave.clutchz, list(pairwise ~ p.treat), adjust = "tukey")
-
 
 
 residuals <- residuals(ave.clutchm)
@@ -145,61 +141,71 @@ plot(fitted(ave.clutchm), residuals,
      main = "Residual Plot")
 
 
-#Does treatment influence latency to lay eggs?
-latencym <- lm(egglatency ~ p.treat, data = F0)
+# Latency to lay eggs
+latencym <- lm(egglatency ~ Volume_conesum + p.treat, data = snail_volumez)
 summary(latencym)
 anova(latencym)
 #nothing
 
-nobs(latencym)
 
 
 
-#Does treatment influence egg mass size?
-eggmassm <- lm(ave.mass ~ p.treat, data = F0)
+
+
+## Models excluded from the analysis for now
+
+# Egg mass size
+eggmassm <- lm(ave.mass ~ p.treat, data = snail_volumez)
 summary(eggmassm)
 anova(eggmassm)
 #nothing
 
+# Number of clutches
+clutchesm <- glm(clutches ~ Volume_conesum + p.treat, family=poisson(link="log"), data = snail_volumez)
+summary(clutchesm)
+#nothing
 
-##Analysis for F1 snails, does parental treatmentxdevelopmental treatment effect F1 traits such as size, 
-## variation in size (STD) and survival?
+
+
+
+
+############################
+##Analysis for F1 snails ####
+############################
+
 
 hist(F1$survival)
 
-survivalmod <- lm(survival ~ p.treat*o.treat, data = F1)
+#Survival
+survivalmod <- lm(survival ~ p.treat*o.treat+ (1|parent), data = F1)
 summary(survivalmod)
 anova(survivalmod)
-#no significant moderators 
-nobs(survivalmod)
+#nothing
 
 
-IDmod <- lm(ID ~ p.treat*o.treat, data = F1)
+## Incubation duration model
+IDmod <- lmer(ID ~ p.treat*o.treat + (1|parent), data = F1)
 summary(IDmod)
 anova(IDmod)
 #Offspring treatment significant, pvalue =tiny
 
-IDmod <- lmer(ID ~ p.treat*o.treat + (1|parent), data = F1)
-summary(IDmod)
-anova(IDmod)
-
-
-
 emmeans(IDmod, list(pairwise ~ o.treat), adjust = "tukey")
 
 
-sizemod <- lmer(size.ave ~ ave.eggsize + p.treat*o.treat + (1|parent), data = F1)
+## Offspring size model
+sizemod <- lmer(size.ave ~ p.treat*o.treat + (1|parent), data = F1)
 summary(sizemod)
 anova(sizemod)
 #singular fit
 #offspring treatment significant P=0.0015
 
-#add in egg size to make sure it is not a contributor to the difference seen
-sizemod <- lmer(size.ave ~ ave.eggsize + p.treat*o.treat + (1|parent), data = F1)
-summary(sizemod)
-anova(sizemod)
+#Try a MCMCglmm model to try and avoid the singularity error
 
+mcmc_size <- MCMCglmm(size.ave ~ ave.eggsize + p.treat*o.treat, random = ~ parent, data = F1)
+summary(mcmc_size)
+# Offspring treatment and average egg size are important predictors of offspring size.
 
+#post hoc test
 emmeans(sizemod, list(pairwise ~ o.treat), adjust = "tukey")
 
 ## AICc 
@@ -209,12 +215,18 @@ aicsize <- lmer(size.ave ~ ave.eggsize + (1|parent), data = F1)
 AIC(aictreat)
 AIC(aicsize)
 
+#Size variation (SD)
 sizevmod <- lmer(size.sd ~ p.treat*o.treat + (1|parent), data = F1)
 summary(sizevmod)
 anova(sizevmod)
 #nothing significant 
-# offspring treatment = 0.0858
 
+
+
+
+#######################################
+########       Graphics     ##########
+#######################################
 
 #Making some grouped box plots
 
