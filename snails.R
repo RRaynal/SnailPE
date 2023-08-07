@@ -15,10 +15,11 @@ library(AICcmodavg)
 library(multcomp)
 library(MASS)
 library(MCMCglmm)
+library(dplyr)
 
 #Load data
-F0<-read.csv("F0.csv")
-F1<-read.csv("F1.csv")
+F0<-read.csv("F0stacked.csv")
+F1<-read.csv("F1stacked.csv")
 
 
 F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
@@ -101,37 +102,46 @@ snail_volumez <- F0 %>%
 ## Parental fecundity models ##
 ###############################
 
-## Run models without any covariates to start
+#Subset data for some variables that have been entered across multiple lines
+#when needed for covariates
+
+TEdata<- snail_volumez %>% distinct(p.ID, .keep_all = TRUE)
+
 
 # Total number of eggs
-totaleggmod <- lm(totalegg ~ Volume_conesum + p.treat, data = snail_volumez)
+totaleggmod <- lm(totalegg ~ Volume_conesum + p.treat, data = TEdata)
 summary(totaleggmod)
 anova(totaleggmod)
 #nothing
 
-
+## Use the full dataset
 # Egg size
-ave.eggsizem <- lm(ave.eggsize ~ Volume_conesum + p.treat, data = snail_volumez)
-summary(ave.eggsizem)
-anova(ave.eggsizem)
+eggsizem <- lmer(eggsize ~ Volume_conesum + p.treat + (1|p.ID), data = snail_volumez)
+summary(eggsizem)
+anova(eggsizem)
 #nothing
 
 
 # Egg size standard deviation
-ave.eggsizesdm <- lm(ave.eggSD ~ Volume_conesum + p.treat, data = snail_volumez)
-summary(ave.eggsizesdm)
-anova(ave.eggsizesdm)
+eggsizesdm <- lmer(eggSD ~ Volume_conesum + p.treat + (1|tank) + (1|p.ID), data = snail_volumez)
+summary(eggsizesdm)
+anova(eggsizesdm)
 #nothing
 
+snail_volumez$clutch.size <- as.numeric(snail_volumez$clutch.size)
+
+#subset the data 
+CSdata <- snail_volumez %>%
+  distinct(p.ID, clutch.no, .keep_all = TRUE)
 
 # Clutch size
-ave.clutchm <- lm(ave.clutch ~ Volume_conesum + p.treat, data = snail_volumez)
-summary(ave.clutchm)
-anova(ave.clutchm)
-# Parental treatment has a signficant p-value (P=0.011)
+clutchm <- lmer(clutch.size ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata)
+summary(clutchm)
+anova(clutchm)
+# Parental treatment has a signficant p-value (P=0.02)
 
 #Post hoc test
-emmeans(ave.clutchz, list(pairwise ~ p.treat), adjust = "tukey")
+emmeans(clutchm, list(pairwise ~ p.treat), adjust = "tukey")
 
 
 residuals <- residuals(ave.clutchm)
@@ -142,7 +152,7 @@ plot(fitted(ave.clutchm), residuals,
 
 
 # Latency to lay eggs
-latencym <- lm(egglatency ~ Volume_conesum + p.treat, data = snail_volumez)
+latencym <- lm(egglatency ~ Volume_conesum + p.treat, data = TEdata)
 summary(latencym)
 anova(latencym)
 #nothing
@@ -155,7 +165,7 @@ anova(latencym)
 ## Models excluded from the analysis for now
 
 # Egg mass size
-eggmassm <- lm(ave.mass ~ p.treat, data = snail_volumez)
+eggmassm <- lmer(mass.area ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata)
 summary(eggmassm)
 anova(eggmassm)
 #nothing
@@ -172,15 +182,17 @@ summary(clutchesm)
 ############################
 ##Analysis for F1 snails ####
 ############################
-
-
+F1$parent <- as.factor(F1$parent)
+F1$survival <- as.factor(F1$survival)
 hist(F1$survival)
 
 #Survival
-survivalmod <- lm(survival ~ p.treat*o.treat+ (1|parent), data = F1)
+survivalmod <- glmer(survival ~ p.treat * o.treat + (1 | parent) + (1 | o.ID) , data = F1, family = binomial)
+
 summary(survivalmod)
 anova(survivalmod)
 #nothing
+#singular fit
 
 
 ## Incubation duration model
@@ -193,17 +205,13 @@ emmeans(IDmod, list(pairwise ~ o.treat), adjust = "tukey")
 
 
 ## Offspring size model
-sizemod <- lmer(size.ave ~ p.treat*o.treat + (1|parent), data = F1)
+sizemod <- lmer(offspring.size ~ p.treat*o.treat + eggsize + (1|parent), data = F1)
 summary(sizemod)
 anova(sizemod)
-#singular fit
-#offspring treatment significant P=0.0015
 
-#Try a MCMCglmm model to try and avoid the singularity error
+#offspring treatment significant, egg size significant
 
-mcmc_size <- MCMCglmm(size.ave ~ ave.eggsize + p.treat*o.treat, random = ~ parent, data = F1)
-summary(mcmc_size)
-# Offspring treatment and average egg size are important predictors of offspring size.
+
 
 #post hoc test
 emmeans(sizemod, list(pairwise ~ o.treat), adjust = "tukey")
@@ -216,11 +224,15 @@ AIC(aictreat)
 AIC(aicsize)
 
 #Size variation (SD)
-sizevmod <- lmer(size.sd ~ p.treat*o.treat + (1|parent), data = F1)
+
+#subset the data 
+SDdata <- F1 %>%
+  distinct(o.ID, offspring.sizesd, .keep_all = TRUE)
+
+sizevmod <- lmer(offspring.sizesd ~ p.treat*o.treat + (1|parent), data = SDdata)
 summary(sizevmod)
 anova(sizevmod)
-#nothing significant 
-
+# nothing
 
 
 
@@ -235,7 +247,7 @@ anova(sizevmod)
 osize <- F1 %>%
   ggplot(aes(x=o.treat, y=size.ave, fill=factor(p.treat))) +
   ylab(bquote('Average offspring size'~(mm))) +
-  labs(x="Developmental treatment", title= "Offspring size interaction", fill="Parental treatment") +
+  labs(x="Developmental treatment", title= "", fill="Parental treatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
@@ -253,7 +265,7 @@ osize
 sizesd <- F1 %>%
   ggplot(aes(x=o.treat, y=size.sd, fill=factor(p.treat))) +
   ylab(bquote('Average offspring SD'~(mm))) +
-  labs(x="Developmental treatment", title= "Offspring size SD interaction", fill="Parental treatment") +
+  labs(x="Developmental treatment", title= "", fill="Parental treatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_y_continuous(expand=c(0.0,0.0), limits=c(0, 0.18)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
@@ -280,161 +292,80 @@ ggarrange(osize, sizesd,
 
 
 
-
-## These were my predictions when investigating the interaction between parental x offspring environment,
-## so arrange these into a panel plot
-
-ggarrange(eggsize, eggsd, 
-          labels = c("A", "B"),
-          common.legend = TRUE, legend = "right", align = "v",
-          ncol = 2, nrow = 1)
-
-
-
-#try grouping by catagories within columns
-#Group by mean of multiple columns
-dfs.mean <- F1 %>% group_by(p.treat, o.treat) %>% 
-  summarise(across(c(survival),mean),
-            .groups = 'drop') %>%
-  as.data.frame()
-
-#IT WORKS
-
-## Survival line plot
-
-
-ggplot(data=merged_data, aes(x=p.treat, y=survival, group=o.treat, shape=o.treat)) +
-  geom_line() + geom_point(aes(colour=o.treat), size=3.5) + 
-  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
-  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
-                        name= "Developmental treatment") +
-  scale_shape_manual(values = c(16,19,1), name= "Developmental treatment",
-                       labels=c("Cold", "Fluctuating", "Hot")) + 
-  ylab(bquote('Proportion survived')) +
-  labs(x="Parental treatment", title= "") +
-  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
-  theme_bw() +
-  theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
-
 ## Parental investment plot
 
-scatter <- F0 %>%
-  ggplot(aes(x = ave.clutch, y = Volume_conesum)) +
-  geom_point(aes(shape = p.treat, color= p.treat), size = 3.5) +
-  scale_shape_manual(values = c(16,19,1), name= "Parental treatment",
-                     labels=c("Cold", "Fluctuating", "Hot")) +
-  scale_color_manual(values = c("black", "grey", "black"), name= "Parental treatment",
-                     labels=c("Cold", "Fluctuating", "Hot"))+
-  ylab(bquote('Volume of snail pair')) +
-  labs(x="Average clutch size", title= "") +
-  theme_bw() +
-  theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
-scatter
-
-
-## Offspring size boxplots but with parental treatment on the x-axis
-library(stringr)  # Load the stringr package
-
-osize1 <- F1 %>%
-  ggplot(aes(x=p.treat, y=size.ave, fill=factor(o.treat))) +
-  ylab(bquote('Average offspring size'~(mm))) +
-  labs(x="Parental treatment", title= "Offspring size interaction", fill="Developmental\nTreatment") +  # Use "\n" for a line break
-  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
-  scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
+clutchplot <- F0 %>%
+  ggplot(aes(x = p.treat, y = ave.clutch, fill = factor(p.treat))) +
+  geom_boxplot() +
+  ylab(bquote("Average clutch size")) +
+  labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   theme_bw() +
-  theme(panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank(),
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        legend.position = "none",  # Hide the legend
         axis.text = element_text(size = 10),
         axis.title = element_text(size = 10),
         plot.title = element_text(size = 12),
         legend.text = element_text(size = 12),
-        legend.title = element_text(size = 10)) +
-  geom_boxplot() + 
-  theme_bw() +
-  theme(legend.title = element_text(size=17),
-        legend.text = element_text(size=15),
-        axis.text=element_text(size=12),
-        axis.title=element_text(size=12))
+        legend.title = element_text(size = 12)) 
+clutchplot
 
-osize1
-
-
-sizesd1 <- F1 %>%
-  ggplot(aes(x=p.treat, y=size.sd, fill=factor(o.treat))) +
-  ylab(bquote('Average offspring SD'~(mm))) +
-  labs(x="Parental treatment", title= "Offspring size SD interaction", fill="Developmental\nTreatment") +
-  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
-  scale_y_continuous(expand=c(0.0,0.0), limits=c(0, 0.18)) +
+eggsizeplot <- F0 %>%
+  ggplot(aes(x = p.treat, y = ave.eggsize, fill = factor(p.treat))) +
+  geom_boxplot() +
+  ylab(bquote("Average egg size")) +
+  labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   theme_bw() +
-  theme(panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank()) +
-  theme(axis.text = element_text(size = 10)) +
-  theme(axis.title = element_text(size = 10)) +
-  theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 10)) +     
-  geom_boxplot() + 
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        legend.position = "none",  # Hide the legend
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        plot.title = element_text(size = 12),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 12)) 
+eggsizeplot
+
+
+
+## Show the relationship we found between offspring treatment, egg size and offspring size
+
+#Grouped scatterplot?
+
+scatterbw <- F1 %>%
+  ggplot(aes(x = ave.eggsize, y = size.ave)) +
+  geom_point(aes(shape = o.treat, color= o.treat), size = 3.5) +
+  scale_shape_manual(values = c(16,19,1), name= "Offspring treatment",
+                     labels=c("Cold", "Fluctuating", "Hot")) +
+  scale_color_manual(values = c("black", "grey", "black"), name= "Offspring treatment",
+                     labels=c("Cold", "Fluctuating", "Hot"))+
+  ylab(bquote('Average offspring size'~(mm))) +
+  labs(x="Average egg size"~(mm)) +
+  theme_bw() +
+  theme(legend.title = element_text(size=15), legend.text = element_text(size=12), axis.text=element_text(size=12),axis.title=element_text(size=12))
+scatterbw
+
+## a colour plot
+
+scattercol <- F1 %>%
+  ggplot(aes(x = size.ave, y = ave.eggsize)) +
+  geom_point(aes(color= o.treat), size = 3.5) +
+  ylab(bquote('Average egg size'~(mm))) +
+  labs(x="Average offspring size"~(mm)) +
+  scale_color_manual(values = c("#2EB5F3", "#C885E8", "#F06423"), name= "Parental treatment",
+                     labels=c("Cold", "Fluctuating", "Hot"))+
   theme_bw() +
   theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
-sizesd1
-
-ggarrange(osize1, sizesd1, 
-          labels = c("A", "B"),
-          common.legend = TRUE, legend = "right", align = "v",
-          ncol = 2, nrow = 1)
-
-## Parental investment graphics
-
-totalegg <- F0 %>%
-  ggplot(aes(x=p.treat, y=totalegg, fill=factor(p.treat))) + 
-  ylab(bquote('Total eggs')) +
-  labs(x="Parental treatment", title= "", fill="Parental treatment") +
-  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
-  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
-  theme(panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank()) +
-  theme(axis.text = element_text(size = 10)) +
-  theme(axis.title = element_text(size = 10)) +
-  theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 12)) +     
-  geom_boxplot() + theme_bw()
-totalegg
-
-
-## Make two plots - visualise parental investment into egg size and egg number.
+scattercol
 
 
 
-## Run a PCA on the parental fecundity variables
-library(psych)
-
-#load data
-F0PCA<-read.csv("~/Dropbox/PHD/Snails/Analysis/F0PCA.csv")
-
-## Look at the correlations
-pairs.panels(F0PCA[,-5],
-             gap = 0,
-             bg = c("red", "yellow", "blue"), 
-             pch=21)
-        
-
-pca2 <-princomp(F0PCA)
 
 
-PCAload <-loadings(pca2)
-print(PCAload, digits = 3, cutoff = 0, sort = FALSE)
-
-### Using the prcomp function as the proportion variance looks weird
-PCA3 <-prcomp(F0PCA, scale= TRUE)
-loadingsPCA3 <- PCA3$rotation
-
-print(PCA3)
-variance <- PCA3$sdev^2
-prop_variance <- variance / sum(variance)
-print(prop_variance)
 
 ## Trying to figure out what is going with the size measurements
 
@@ -469,6 +400,44 @@ anova(snailvol)
 
 snailvol2 <- aov(snailvol)
 TukeyHSD(snailvol2, "p.treat")
+
+
+##################################################
+####### Not being used at the moment ###############
+###################################################
+
+
+
+## Run a PCA on the parental fecundity variables
+library(psych)
+
+#load data
+F0PCA<-read.csv("~/Dropbox/PHD/Snails/Analysis/F0PCA.csv")
+
+## Look at the correlations
+pairs.panels(F0PCA[,-5],
+             gap = 0,
+             bg = c("red", "yellow", "blue"), 
+             pch=21)
+
+
+pca2 <-princomp(F0PCA)
+
+
+PCAload <-loadings(pca2)
+print(PCAload, digits = 3, cutoff = 0, sort = FALSE)
+
+### Using the prcomp function as the proportion variance looks weird
+PCA3 <-prcomp(F0PCA, scale= TRUE)
+loadingsPCA3 <- PCA3$rotation
+
+print(PCA3)
+variance <- PCA3$sdev^2
+prop_variance <- variance / sum(variance)
+print(prop_variance)
+
+
+
 
 ## Calculate confidence intervals for the survival parental effects plot
 
@@ -517,4 +486,29 @@ ggplot(data=merged_data, aes(x=p.treat, y=survival, group=o.treat, shape=o.treat
         axis.text = element_text(size=12),
         axis.title = element_text(size=12))
 
+
+
+#try grouping by catagories within columns
+#Group by mean of multiple columns
+dfs.mean <- F1 %>% group_by(p.treat, o.treat) %>% 
+  summarise(across(c(survival),mean),
+            .groups = 'drop') %>%
+  as.data.frame()
+
+#IT WORKS
+
+## Survival line plot
+
+ggplot(data=merged_data, aes(x=p.treat, y=survival, group=o.treat, shape=o.treat)) +
+  geom_line() + geom_point(aes(colour=o.treat), size=3.5) + 
+  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
+  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
+                      name= "Developmental treatment") +
+  scale_shape_manual(values = c(16,19,1), name= "Developmental treatment",
+                     labels=c("Cold", "Fluctuating", "Hot")) + 
+  ylab(bquote('Proportion survived')) +
+  labs(x="Parental treatment", title= "") +
+  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  theme_bw() +
+  theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
 
