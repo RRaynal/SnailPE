@@ -17,6 +17,8 @@ library(MASS)
 library(MCMCglmm)
 library(dplyr)
 
+
+
 #Load data
 F0<-read.csv("F0stacked.csv")
 F1<-read.csv("F1stacked.csv")
@@ -36,11 +38,6 @@ ggplot(aes(x = totalegg, y = totalmass, color = p.treat)) +
   geom_point()
 massegg
 
-#Size difference between parents and clutch number
-sizextotalegg <- F0 %>%
-  ggplot(aes(x = r.sizediff, y = totalegg, color = p.treat)) +
-  geom_point()
-sizextotalegg
 
 #clutch number and total eggs laid
 clutchxtotalegg <- F0 %>%
@@ -121,9 +118,29 @@ summary(eggsizem)
 anova(eggsizem)
 #nothing
 
+#calculate the coefficient of variance from the SD and means
 
-# Egg size standard deviation
-eggsizesdm <- lmer(eggSD ~ Volume_conesum + p.treat + (1|tank) + (1|p.ID), data = snail_volumez)
+F0coef <- snail_volumez %>%
+  group_by(tank) %>%
+  summarise(mean_egg_size = mean(eggsize),
+            cv = eggSD / mean_egg_size * 100)
+
+#subset the data 
+F0coefU <- F0coef %>%
+  distinct(tank, cv, .keep_all = TRUE)
+
+#add coefficient of variance to the data
+data_merged <- snail_volumez %>%
+  left_join(F0coefU, by = "tank")
+
+#subset the data 
+F0SD <- data_merged %>%
+  distinct(tank, cv, .keep_all = TRUE)
+
+
+
+# Egg size coef var model
+eggsizesdm <- lmer(cv ~ Volume_conesum + p.treat + (1|p.ID), data = F0SD)
 summary(eggsizesdm)
 anova(eggsizesdm)
 #nothing
@@ -162,37 +179,73 @@ anova(latencym)
 
 
 
-## Models excluded from the analysis for now
-
-# Egg mass size
-eggmassm <- lmer(mass.area ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata)
-summary(eggmassm)
-anova(eggmassm)
-#nothing
-
-# Number of clutches
-clutchesm <- glm(clutches ~ Volume_conesum + p.treat, family=poisson(link="log"), data = snail_volumez)
-summary(clutchesm)
-#nothing
-
-
-
 
 
 ############################
 ##Analysis for F1 snails ####
 ############################
 F1$parent <- as.factor(F1$parent)
-F1$survival <- as.factor(F1$survival)
-hist(F1$survival)
+F1$tank.ID <- as.factor(F1$tank.ID)
+
+#We will be doing AIC selection for these models, so need an intercept to compare them
+
+survivalint <- glmer(cbind(hatched, unhatched) ~ (1|parent), 
+                     data = F1, 
+                     family = binomial)
+
+summary(survivalint)
+
+##   AIC      BIC   logLik 
+## 848.0    857.4   -422.0 
+
 
 #Survival
-survivalmod <- glmer(survival ~ p.treat * o.treat + (1 | parent) + (1 | o.ID) , data = F1, family = binomial)
-
+survivalmod <- glmer(cbind(hatched, unhatched) ~ p.treat * o.treat + (1|parent), 
+                     data = F1, 
+                     family = binomial)
+                     
 summary(survivalmod)
 anova(survivalmod)
-#nothing
-#singular fit
+
+#AIC = 801.7, BIC= 848.7
+
+# test the interaction
+survivalmod2 <- glmer(cbind(hatched, unhatched) ~ p.treat + o.treat + (1|parent), 
+                     data = F1, 
+                     family = binomial)
+
+summary(survivalmod2)
+
+#AIC = 813.3, BIC= 841.5
+
+#Test the moderators
+survivalmod3 <- glmer(cbind(hatched, unhatched) ~ o.treat + (1|parent), 
+                      data = F1, 
+                      family = binomial)
+
+summary(survivalmod3)
+
+# AIC= 813.9, BIC= 932.7
+
+#Test the moderators
+survivalmod4 <- glmer(cbind(hatched, unhatched) ~ p.treat + (1|parent), 
+                      data = F1, 
+                      family = binomial)
+
+summary(survivalmod4)
+
+# AIC= 849.1, BIC=867.9 
+
+## Interesting, it likes the model with the interaction the most.
+
+#Work out the sample sizes for each o.treat
+
+observation_counts <- F1 %>%
+  group_by(o.treat) %>%
+  summarise(total_observations = sum(hatched, na.rm = TRUE) + sum(unhatched, na.rm = TRUE))
+
+observation_counts
+
 
 
 ## Incubation duration model
@@ -203,11 +256,27 @@ anova(IDmod)
 
 emmeans(IDmod, list(pairwise ~ o.treat), adjust = "tukey")
 
+## There were too many tanks with 3 or fewer  offspring size measurements, so we could not include
+## tank as a random effect. (18 tanks) - Or exclude these
+
+
+Sizedata <- F1 %>%
+  filter(!is.na(offspring.size)) %>%
+  distinct(tank.ID, offspring.size, .keep_all = TRUE)
 
 ## Offspring size model
-sizemod <- lmer(offspring.size ~ p.treat*o.treat + eggsize + (1|parent), data = F1)
+sizemod <- lmer(offspring.size ~ p.treat*o.treat + eggsize + (1|parent), data = Sizedata)
 summary(sizemod)
 anova(sizemod)
+
+offspring_count <- Sizedata %>%
+  group_by(o.treat) %>%
+  summarise(count = n())
+
+offspring_count
+
+offspring_count
+
 
 #offspring treatment significant, egg size significant
 
@@ -216,20 +285,33 @@ anova(sizemod)
 #post hoc test
 emmeans(sizemod, list(pairwise ~ o.treat), adjust = "tukey")
 
-## AICc 
-aictreat <- lmer(size.ave ~ o.treat + (1|parent), data = F1)
-aicsize <- lmer(size.ave ~ ave.eggsize + (1|parent), data = F1)
 
-AIC(aictreat)
-AIC(aicsize)
+#calculate the coefficient of variance from the SD and means
+## First get rid of the double ups
+F1SD <- F1 %>%
+  distinct(tank.ID, offspring.sizesd, .keep_all = TRUE)%>%
+  filter(!is.na(offspring.sizesd))
 
-#Size variation (SD)
+
+F1coef <- F1SD %>%
+  group_by(tank.ID) %>%
+  summarise(cv = offspring.sizesd / offspring.size * 100)
+
+
+#add coefficient of variance to the data
+data_merged <- F1 %>%
+  left_join(F1coef, by = "tank.ID")
 
 #subset the data 
-SDdata <- F1 %>%
-  distinct(o.ID, offspring.sizesd, .keep_all = TRUE)
+F1SDU <- data_merged %>%
+  distinct(tank.ID, cv, .keep_all = TRUE)%>%
+  filter(!is.na(cv))
 
-sizevmod <- lmer(offspring.sizesd ~ p.treat*o.treat + (1|parent), data = SDdata)
+
+#Size variation (coefficient of variation)
+
+
+sizevmod <- lmer(cv ~ p.treat*o.treat + (1|parent), data = F1SDU)
 summary(sizevmod)
 anova(sizevmod)
 # nothing
@@ -245,9 +327,9 @@ anova(sizevmod)
 ##Offspring size - offspring x parental treatment
 
 osize <- F1 %>%
-  ggplot(aes(x=o.treat, y=size.ave, fill=factor(p.treat))) +
-  ylab(bquote('Average offspring size'~(mm))) +
-  labs(x="Developmental treatment", title= "", fill="Parental treatment") +
+  ggplot(aes(x=p.treat, y=offspring.size, fill=factor(o.treat))) +
+  ylab(bquote('Offspring size'~(mm))) +
+  labs(x="Parental Treatment", title= "", fill="Developmental treatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
@@ -257,17 +339,17 @@ osize <- F1 %>%
   theme(axis.text = element_text(size = 10)) +
   theme(axis.title = element_text(size = 10)) +
   theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 12)) +     
+  theme(legend.text = element_text(size = 18)) +
+  theme(legend.title = element_text(size = 20)) +     
   geom_boxplot() + theme_bw()
 osize
 
-sizesd <- F1 %>%
-  ggplot(aes(x=o.treat, y=size.sd, fill=factor(p.treat))) +
-  ylab(bquote('Average offspring SD'~(mm))) +
-  labs(x="Developmental treatment", title= "", fill="Parental treatment") +
+sizesd <- F1SDU %>%
+  ggplot(aes(x=p.treat, y=cv, fill=factor(o.treat))) +
+  ylab(bquote('Offspring Coefficient of variation')) +
+  labs(x="Parental treatment", title= "", fill="Developmental treatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
-  scale_y_continuous(expand=c(0.0,0.0), limits=c(0, 0.18)) +
+  scale_y_continuous(expand=c(0.0,0.0), limits=c()) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   theme_bw() +
   theme(panel.grid.minor=element_blank(),
@@ -275,8 +357,8 @@ sizesd <- F1 %>%
   theme(axis.text = element_text(size = 10)) +
   theme(axis.title = element_text(size = 10)) +
   theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 12)) +
-  theme(legend.title = element_text(size = 12)) +     
+  theme(legend.text = element_text(size = 18)) +
+  theme(legend.title = element_text(size = 20)) +     
   geom_boxplot() + theme_bw()
 sizesd
 
@@ -295,9 +377,9 @@ ggarrange(osize, sizesd,
 ## Parental investment plot
 
 clutchplot <- F0 %>%
-  ggplot(aes(x = p.treat, y = ave.clutch, fill = factor(p.treat))) +
+  ggplot(aes(x = p.treat, y = clutch.size, fill = factor(p.treat))) +
   geom_boxplot() +
-  ylab(bquote("Average clutch size")) +
+  ylab(bquote("Clutch size")) +
   labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
@@ -308,14 +390,14 @@ clutchplot <- F0 %>%
         axis.text = element_text(size = 10),
         axis.title = element_text(size = 10),
         plot.title = element_text(size = 12),
-        legend.text = element_text(size = 12),
-        legend.title = element_text(size = 12)) 
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 17)) 
 clutchplot
 
 eggsizeplot <- F0 %>%
-  ggplot(aes(x = p.treat, y = ave.eggsize, fill = factor(p.treat))) +
+  ggplot(aes(x = p.treat, y = eggsize, fill = factor(p.treat))) +
   geom_boxplot() +
-  ylab(bquote("Average egg size")) +
+  ylab(bquote("Egg size")) +
   labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
@@ -330,20 +412,27 @@ eggsizeplot <- F0 %>%
         legend.title = element_text(size = 12)) 
 eggsizeplot
 
+# GGarrange, I think while we found nothing for the trade off between egg size and clutch size
+#its a major theme throughout.
 
+ggarrange(eggsizeplot, clutchplot, 
+          labels = c("A", "B"),
+          ncol = 2, nrow = 1)
 
 ## Show the relationship we found between offspring treatment, egg size and offspring size
 
 #Grouped scatterplot?
 
+
+
 scatterbw <- F1 %>%
-  ggplot(aes(x = ave.eggsize, y = size.ave)) +
+  ggplot(aes(x = eggsize, y = offspring.size)) +
   geom_point(aes(shape = o.treat, color= o.treat), size = 3.5) +
   scale_shape_manual(values = c(16,19,1), name= "Offspring treatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
   scale_color_manual(values = c("black", "grey", "black"), name= "Offspring treatment",
                      labels=c("Cold", "Fluctuating", "Hot"))+
-  ylab(bquote('Average offspring size'~(mm))) +
+  ylab(bquote('offspring size'~(mm))) +
   labs(x="Average egg size"~(mm)) +
   theme_bw() +
   theme(legend.title = element_text(size=15), legend.text = element_text(size=12), axis.text=element_text(size=12),axis.title=element_text(size=12))
@@ -402,6 +491,66 @@ snailvol2 <- aov(snailvol)
 TukeyHSD(snailvol2, "p.treat")
 
 
+
+
+
+
+
+
+
+
+
+#try grouping by catagories within columns
+#Group by mean of multiple columns
+# Group by mean of multiple columns
+dfs.mean <- F1 %>%
+  group_by(p.treat, o.treat) %>%
+  summarise(survival_rate = mean(hatched, na.rm = TRUE),
+            n = n(),
+            .groups = 'drop') %>%
+  as.data.frame()
+
+dfs.mean <- dfs.mean %>%
+  filter(!is.na(n) & n != 2)
+
+
+# Calculate standard error
+summary_data <- dfs.mean %>%
+  group_by(p.treat) %>%
+  mutate(se = sqrt(survival_rate * (1 - survival_rate) / n))
+
+# Calculate confidence intervals (e.g., using 95% confidence level)
+z_value <- qnorm(0.975)  # For 95% confidence level (two-tailed)
+summary_data <- summary_data %>%
+  group_by(p.treat) %>%
+  mutate(lower_ci = survival_rate - z_value * se,
+         upper_ci = survival_rate + z_value * se)
+
+
+# Merge summary_data with dfs.mean based on p.treat and o.treat
+merged_data <- merge(dfs.mean, summary_data, by = c("p.treat", "o.treat"), all.x = TRUE)
+
+
+ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=o.treat)) +
+  geom_line() +
+  geom_point(aes(colour=o.treat), size=3.5) +
+  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
+  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
+                      name= "Developmental treatment") +
+  scale_shape_manual(values=c(16, 19, 1), name= "Developmental treatment",
+                     labels=c("Cold", "Fluctuating", "Hot")) +
+  ylab(bquote('Proportion survived')) +
+  labs(x="Parental treatment", title= "") +
+  scale_x_discrete(labels=c("Cold", "Fluctuating", "Hot")) +
+  theme_bw() +
+  theme(legend.title = element_text(size=17),
+        legend.text = element_text(size=15),
+        axis.text = element_text(size=12),
+        axis.title = element_text(size=12))
+
+## Trying with raw values
+
+
 ##################################################
 ####### Not being used at the moment ###############
 ###################################################
@@ -436,79 +585,4 @@ variance <- PCA3$sdev^2
 prop_variance <- variance / sum(variance)
 print(prop_variance)
 
-
-
-
-## Calculate confidence intervals for the survival parental effects plot
-
-# Group by p.treat and o.treat and calculate mean and standard error
-summary_data <- dfs.mean %>%
-  group_by(p.treat, o.treat) %>%
-  summarise(mean_proportion = mean(survival),
-            n = n())
-
-# Calculate standard error
-summary_data <- summary_data %>%
-  group_by(p.treat) %>%
-  mutate(se = sqrt(mean_proportion * (1 - mean_proportion) / n))
-
-# Calculate confidence intervals (e.g., using 95% confidence level)
-z_value <- qnorm(0.975)  # For 95% confidence level (two-tailed)
-summary_data <- summary_data %>%
-  group_by(p.treat) %>%
-  mutate(lower_ci = mean_proportion - z_value * se,
-         upper_ci = mean_proportion + z_value * se)
-
-# Print the summary data with confidence intervals
-print(summary_data)
-
-# Merge summary_data with dfs.mean based on p.treat and o.treat
-merged_data <- merge(dfs.mean, summary_data, by = c("p.treat", "o.treat"), all.x = TRUE)
-
-# Print the merged data
-print(merged_data)
-
-
-ggplot(data=merged_data, aes(x=p.treat, y=survival, group=o.treat, shape=o.treat)) +
-  geom_line() +
-  geom_point(aes(colour=o.treat), size=3.5) +
-  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
-  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
-                      name= "Developmental treatment") +
-  scale_shape_manual(values=c(16, 19, 1), name= "Developmental treatment",
-                     labels=c("Cold", "Fluctuating", "Hot")) +
-  ylab(bquote('Proportion survived')) +
-  labs(x="Parental treatment", title= "") +
-  scale_x_discrete(labels=c("Cold", "Fluctuating", "Hot")) +
-  theme_bw() +
-  theme(legend.title = element_text(size=17),
-        legend.text = element_text(size=15),
-        axis.text = element_text(size=12),
-        axis.title = element_text(size=12))
-
-
-
-#try grouping by catagories within columns
-#Group by mean of multiple columns
-dfs.mean <- F1 %>% group_by(p.treat, o.treat) %>% 
-  summarise(across(c(survival),mean),
-            .groups = 'drop') %>%
-  as.data.frame()
-
-#IT WORKS
-
-## Survival line plot
-
-ggplot(data=merged_data, aes(x=p.treat, y=survival, group=o.treat, shape=o.treat)) +
-  geom_line() + geom_point(aes(colour=o.treat), size=3.5) + 
-  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
-  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
-                      name= "Developmental treatment") +
-  scale_shape_manual(values = c(16,19,1), name= "Developmental treatment",
-                     labels=c("Cold", "Fluctuating", "Hot")) + 
-  ylab(bquote('Proportion survived')) +
-  labs(x="Parental treatment", title= "") +
-  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
-  theme_bw() +
-  theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
 
