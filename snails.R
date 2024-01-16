@@ -329,37 +329,41 @@ anova(sizevmod)
 osize <- F1 %>%
   ggplot(aes(x=p.treat, y=offspring.size, fill=factor(o.treat))) +
   ylab(bquote('Offspring size'~(mm))) +
-  labs(x="Parental Treatment", title= "", fill="Developmental treatment") +
+  labs(x="Parental Treatment", title= "", fill="Developmental\ntreatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  geom_boxplot() +
   theme_bw() +
-  theme(panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank()) +
-  theme(axis.text = element_text(size = 10)) +
-  theme(axis.title = element_text(size = 10)) +
-  theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 18)) +
-  theme(legend.title = element_text(size = 20)) +     
-  geom_boxplot() + theme_bw()
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18)
+  )
 osize
 
 sizesd <- F1SDU %>%
-  ggplot(aes(x=p.treat, y=cv, fill=factor(o.treat))) +
+  ggplot(aes(x = p.treat, y = cv, fill = factor(o.treat))) +
   ylab(bquote('Offspring Coefficient of variation')) +
-  labs(x="Parental treatment", title= "", fill="Developmental treatment") +
-  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
-  scale_y_continuous(expand=c(0.0,0.0), limits=c()) +
+  labs(x = "Parental treatment", title = "", fill = "Developmental\ntreatment") +
+  scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_y_continuous(expand = c(0.0, 0.0), limits = c(0, 25)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  geom_boxplot() +
   theme_bw() +
-  theme(panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank()) +
-  theme(axis.text = element_text(size = 10)) +
-  theme(axis.title = element_text(size = 10)) +
-  theme(plot.title = element_text(size = 12)) +
-  theme(legend.text = element_text(size = 18)) +
-  theme(legend.title = element_text(size = 20)) +     
-  geom_boxplot() + theme_bw()
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18)
+  )
 sizesd
 
 
@@ -387,11 +391,11 @@ clutchplot <- F0 %>%
   theme(panel.grid.minor = element_blank(),
         panel.grid.major = element_blank(),
         legend.position = "none",  # Hide the legend
-        axis.text = element_text(size = 10),
-        axis.title = element_text(size = 10),
-        plot.title = element_text(size = 12),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 17)) 
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18)) 
 clutchplot
 
 eggsizeplot <- F0 %>%
@@ -405,11 +409,11 @@ eggsizeplot <- F0 %>%
   theme(panel.grid.minor = element_blank(),
         panel.grid.major = element_blank(),
         legend.position = "none",  # Hide the legend
-        axis.text = element_text(size = 10),
-        axis.title = element_text(size = 10),
-        plot.title = element_text(size = 12),
-        legend.text = element_text(size = 12),
-        legend.title = element_text(size = 12)) 
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18)) 
 eggsizeplot
 
 # GGarrange, I think while we found nothing for the trade off between egg size and clutch size
@@ -428,14 +432,18 @@ ggarrange(eggsizeplot, clutchplot,
 scatterbw <- F1 %>%
   ggplot(aes(x = eggsize, y = offspring.size)) +
   geom_point(aes(shape = o.treat, color= o.treat), size = 3.5) +
-  scale_shape_manual(values = c(16,19,1), name= "Offspring treatment",
+  scale_shape_manual(values = c(16,19,1), name= "Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
-  scale_color_manual(values = c("black", "grey", "black"), name= "Offspring treatment",
+  scale_color_manual(values = c("black", "grey", "black"), name= "Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot"))+
-  ylab(bquote('offspring size'~(mm))) +
+  ylab(bquote('Offspring size'~(mm))) +
   labs(x="Average egg size"~(mm)) +
   theme_bw() +
-  theme(legend.title = element_text(size=15), legend.text = element_text(size=12), axis.text=element_text(size=12),axis.title=element_text(size=12))
+  theme(    axis.text = element_text(size = 14),
+            axis.title = element_text(size = 16),
+            plot.title = element_text(size = 18),
+            legend.text = element_text(size = 16),
+            legend.title = element_text(size = 18))
 scatterbw
 
 ## a colour plot
@@ -536,17 +544,17 @@ ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=
   geom_point(aes(colour=o.treat), size=3.5) +
   geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
   scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
-                      name= "Developmental treatment") +
-  scale_shape_manual(values=c(16, 19, 1), name= "Developmental treatment",
+                      name= "Developmental\ntreatment") +
+  scale_shape_manual(values=c(16, 19, 1), name= "Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
   ylab(bquote('Proportion survived')) +
   labs(x="Parental treatment", title= "") +
   scale_x_discrete(labels=c("Cold", "Fluctuating", "Hot")) +
   theme_bw() +
-  theme(legend.title = element_text(size=17),
-        legend.text = element_text(size=15),
-        axis.text = element_text(size=12),
-        axis.title = element_text(size=12))
+  theme(legend.title = element_text(size=18),
+        legend.text = element_text(size=16),
+        axis.text = element_text(size=14),
+        axis.title = element_text(size=16))
 
 ## Trying with raw values
 
