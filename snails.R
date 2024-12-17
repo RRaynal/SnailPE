@@ -14,15 +14,15 @@ library(broom)
 library(AICcmodavg)
 library(multcomp)
 library(MASS)
-library(MCMCglmm)
+library(glmmTMB)
 library(dplyr)
-
+library(car)
 
 
 #Load data
 F0<-read.csv("F0stacked.csv")
 F1<-read.csv("F1stacked.csv")
-
+F1egg <-read.csv("F1egg.csv")
 
 F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
 F0$p.treat <- as.factor(F0$p.treat)
@@ -52,12 +52,15 @@ snailsize <- F0 %>%
 snailsize
 
 eggsizevnumber <- F0 %>%
-  ggplot(aes(x = totalegg, y = ave.eggsize, color = p.treat)) +
+  ggplot(aes(x = clutch.size, y = eggsize, color = p.treat)) +
   geom_point() + theme_bw()
 eggsizevnumber
-  
-simple <- lm(ave.clutch ~ ave.eggsize, data = F0)
-summary(simple)
+
+
+## are egg size and egg number correlated (regardless of temp treatment)?
+
+simplePP <- glmmTMB(clutch.size ~ eggsize + (1|p.ID),  data = F0)
+summary(simplePP)
 
 ## even without taking parental temperature into account, there is no relationship between egg size and total number of eggs
   
@@ -80,6 +83,13 @@ ggplot(data=cdata, aes(x=clutch, y=number, group=P.ID)) +
 ##### Run the models #####
 ########################
 
+average_volume <- F0 %>%
+  group_by(p.treat) %>%
+  summarise(
+    avg_volume = mean(Volume_conesum, na.rm = TRUE),
+    sd_volume = sd(Volume_conesum, na.rm = TRUE),
+    .groups = 'drop'
+  )
 #But first z transform the volume of snail pair within treatment groups
 
 # Function to perform Z-transform within groups
@@ -106,16 +116,18 @@ TEdata<- snail_volumez %>% distinct(p.ID, .keep_all = TRUE)
 
 
 # Total number of eggs
-totaleggmod <- lm(totalegg ~ Volume_conesum + p.treat, data = TEdata)
+totaleggmod <- glmmTMB(totalegg ~ Volume_conesum + p.treat, 
+                       data = TEdata, 
+                       family = gaussian(link = "identity"))
 summary(totaleggmod)
-anova(totaleggmod)
+Anova(totaleggmod, type = "II")
 #nothing
 
 ## Use the full dataset
 # Egg size
-eggsizem <- lmer(eggsize ~ Volume_conesum + p.treat + (1|p.ID), data = snail_volumez)
+eggsizem <- glmmTMB(eggsize ~ Volume_conesum + p.treat + (1|p.ID), data = snail_volumez, family = gaussian(link = "identity"))
 summary(eggsizem)
-anova(eggsizem)
+Anova(eggsizem, type = "II")
 #nothing
 
 #calculate the coefficient of variance from the SD and means
@@ -140,9 +152,9 @@ F0SD <- data_merged %>%
 
 
 # Egg size coef var model
-eggsizesdm <- lmer(cv ~ Volume_conesum + p.treat + (1|p.ID), data = F0SD)
+eggsizesdm <- glmmTMB(cv ~ Volume_conesum + p.treat + (1|p.ID), data = F0SD, family = gaussian(link = "identity"))
 summary(eggsizesdm)
-anova(eggsizesdm)
+Anova(eggsizesdm, type = "II")
 #nothing
 
 snail_volumez$clutch.size <- as.numeric(snail_volumez$clutch.size)
@@ -152,9 +164,9 @@ CSdata <- snail_volumez %>%
   distinct(p.ID, clutch.no, .keep_all = TRUE)
 
 # Clutch size
-clutchm <- lmer(clutch.size ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata)
+clutchm <- glmmTMB(clutch.size ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata, family = gaussian(link = "identity"))
 summary(clutchm)
-anova(clutchm)
+Anova(clutchm, type = "II")
 # Parental treatment has a signficant p-value (P=0.02)
 
 #Post hoc test
@@ -169,12 +181,19 @@ plot(fitted(ave.clutchm), residuals,
 
 
 # Latency to lay eggs
-latencym <- lm(egglatency ~ Volume_conesum + p.treat, data = TEdata)
+latencym <- glmmTMB(egglatency ~ Volume_conesum + p.treat, data = TEdata, family = gaussian(link = "identity"))
 summary(latencym)
-anova(latencym)
+Anova(latencym, type = "II")
 #nothing
 
+#number of clutches
 
+clutchn_mod <- glmmTMB(clutches ~ Volume_conesum + p.treat, 
+                       data = TEdata, 
+                       family = gaussian(link = "identity"))
+
+summary(clutchn)
+Anova(clutchn_mod, type = "II")
 
 
 
@@ -187,56 +206,18 @@ anova(latencym)
 F1$parent <- as.factor(F1$parent)
 F1$tank.ID <- as.factor(F1$tank.ID)
 
-#We will be doing AIC selection for these models, so need an intercept to compare them
-
-survivalint <- glmer(cbind(hatched, unhatched) ~ (1|parent), 
-                     data = F1, 
-                     family = binomial)
-
-summary(survivalint)
-
-##   AIC      BIC   logLik 
-## 848.0    857.4   -422.0 
-
 
 #Survival
-survivalmod <- glmer(cbind(hatched, unhatched) ~ p.treat * o.treat + (1|parent), 
-                     data = F1, 
-                     family = binomial)
+survivalmod <- glmmTMB(cbind(hatched, unhatched) ~ p.treat * o.treat + (1| parent) + (1 | tank.ID), 
+                       data = F1, 
+                       family = binomial)
                      
 summary(survivalmod)
-anova(survivalmod)
+Anova(survivalmod, type = "II")
 
-#AIC = 801.7, BIC= 848.7
+#Post hoc test
+emmeans(survivalmod, pairwise ~ o.treat, adjust = "tukey")
 
-# test the interaction
-survivalmod2 <- glmer(cbind(hatched, unhatched) ~ p.treat + o.treat + (1|parent), 
-                     data = F1, 
-                     family = binomial)
-
-summary(survivalmod2)
-
-#AIC = 813.3, BIC= 841.5
-
-#Test the moderators
-survivalmod3 <- glmer(cbind(hatched, unhatched) ~ o.treat + (1|parent), 
-                      data = F1, 
-                      family = binomial)
-
-summary(survivalmod3)
-
-# AIC= 813.9, BIC= 932.7
-
-#Test the moderators
-survivalmod4 <- glmer(cbind(hatched, unhatched) ~ p.treat + (1|parent), 
-                      data = F1, 
-                      family = binomial)
-
-summary(survivalmod4)
-
-# AIC= 849.1, BIC=867.9 
-
-## Interesting, it likes the model with the interaction the most.
 
 #Work out the sample sizes for each o.treat
 
@@ -249,15 +230,25 @@ observation_counts
 
 
 ## Incubation duration model
-IDmod <- lmer(ID ~ p.treat*o.treat + (1|parent), data = F1)
+
+F1_ID <- F1 %>%
+  drop_na(ID) %>%
+  droplevels()
+
+
+
+IDmod <- glmmTMB(ID ~ p.treat * o.treat + (1 | parent), 
+                 data = F1_ID, 
+                 family = gaussian(link = "identity"))
 summary(IDmod)
-anova(IDmod)
-#Offspring treatment significant, pvalue =tiny
+Anova(IDmod, type = "II")  # or type = "III"
+
+#Offsprintg treatment significant, pvalue =tiny
 
 emmeans(IDmod, list(pairwise ~ o.treat), adjust = "tukey")
 
-## There were too many tanks with 3 or fewer  offspring size measurements, so we could not include
-## tank as a random effect. (18 tanks) - Or exclude these
+emmeans(IDmod, list(pairwise ~ p.treat), adjust = "tukey")
+
 
 
 Sizedata <- F1 %>%
@@ -265,18 +256,20 @@ Sizedata <- F1 %>%
   distinct(tank.ID, offspring.size, .keep_all = TRUE)
 
 ## Offspring size model
-sizemod <- lmer(offspring.size ~ p.treat*o.treat + eggsize + (1|parent), data = Sizedata)
+
+sizemod <- glmmTMB(offspring.size ~ p.treat * o.treat + eggsize + (1 | parent) + (1 | tank.ID), 
+                   data = Sizedata, 
+                   family = gaussian(link = "identity"))
+
 summary(sizemod)
-anova(sizemod)
+Anova(sizemod, type = "II")
+
 
 offspring_count <- Sizedata %>%
   group_by(o.treat) %>%
   summarise(count = n())
 
 offspring_count
-
-offspring_count
-
 
 #offspring treatment significant, egg size significant
 
@@ -311,9 +304,11 @@ F1SDU <- data_merged %>%
 #Size variation (coefficient of variation)
 
 
-sizevmod <- lmer(cv ~ p.treat*o.treat + (1|parent), data = F1SDU)
+sizevmod <- glmmTMB(cv ~ p.treat * o.treat + (1 | parent), 
+                    data = F1SDU, 
+                    family = gaussian(link = "identity"))
 summary(sizevmod)
-anova(sizevmod)
+Anova(sizevmod, type = "II")
 # nothing
 
 
@@ -346,6 +341,29 @@ osize <- F1 %>%
   )
 osize
 
+#ID plot
+
+IDplot <- F1_ID %>%
+  ggplot(aes(x=p.treat, y=ID, fill=factor(o.treat))) +
+  ylab(bquote('Incubation duration'~(days))) +
+  labs(x="Parental Treatment", title= "", fill="Developmental\ntreatment") +
+  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18)
+  )
+IDplot
+
+
+
 sizesd <- F1SDU %>%
   ggplot(aes(x = p.treat, y = cv, fill = factor(o.treat))) +
   ylab(bquote('Offspring Coefficient of variation')) +
@@ -371,7 +389,7 @@ sizesd
 ## These were my predictions when investigating the interaction between parental x offspring environment,
 ## so arrange these into a panel plot
 
-ggarrange(osize, sizesd, 
+ggarrange(IDplot, osize, 
           labels = c("A", "B"),
           common.legend = TRUE, legend = "right", align = "v",
           ncol = 2, nrow = 1)
@@ -430,13 +448,13 @@ ggarrange(eggsizeplot, clutchplot,
 
 
 scatterbw <- F1 %>%
-  ggplot(aes(x = eggsize, y = offspring.size)) +
+  ggplot(aes(x = eggsize, y = avg_offspring_size)) +
   geom_point(aes(shape = o.treat, color= o.treat), size = 3.5) +
   scale_shape_manual(values = c(16,19,1), name= "Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
   scale_color_manual(values = c("black", "grey", "black"), name= "Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot"))+
-  ylab(bquote('Offspring size'~(mm))) +
+  ylab(bquote('Average offspring size'~(mm))) +
   labs(x="Average egg size"~(mm)) +
   theme_bw() +
   theme(    axis.text = element_text(size = 14),
@@ -500,17 +518,9 @@ TukeyHSD(snailvol2, "p.treat")
 
 
 
-
-
-
-
-
-
-
-
 #try grouping by catagories within columns
 #Group by mean of multiple columns
-# Group by mean of multiple columns
+
 dfs.mean <- F1 %>%
   group_by(p.treat, o.treat) %>%
   summarise(survival_rate = mean(hatched, na.rm = TRUE),
@@ -541,56 +551,52 @@ merged_data <- merge(dfs.mean, summary_data, by = c("p.treat", "o.treat"), all.x
 
 ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=o.treat)) +
   geom_line() +
-  geom_point(aes(colour=o.treat), size=3.5) +
   geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
-  scale_colour_manual(values=c("black", "grey", "black"), labels=c("Cold", "Fluctuating", "Hot"),
-                      name= "Developmental\ntreatment") +
-  scale_shape_manual(values=c(16, 19, 1), name= "Developmental\ntreatment",
+  geom_point(aes(colour=o.treat, fill=o.treat), size=5, stroke=1) + 
+  scale_shape_manual(values=c(21, 21, 21),
+                     name="Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
+  scale_fill_manual(values=c("black", "grey", "white"),  
+                    name="Developmental\ntreatment",
+                    labels=c("Cold", "Fluctuating", "Hot")) +
+  scale_colour_manual(values=c("black", "black", "black"),  # Border colors
+                      name="Developmental\ntreatment",
+                      labels=c("Cold", "Fluctuating", "Hot")) +
   ylab(bquote('Proportion survived')) +
-  labs(x="Parental treatment", title= "") +
+  labs(x="Parental treatment", title="") +
   scale_x_discrete(labels=c("Cold", "Fluctuating", "Hot")) +
   theme_bw() +
   theme(legend.title = element_text(size=18),
         legend.text = element_text(size=16),
         axis.text = element_text(size=14),
         axis.title = element_text(size=16))
-
-## Trying with raw values
-
-
-##################################################
-####### Not being used at the moment ###############
-###################################################
+ 
 
 
 
-## Run a PCA on the parental fecundity variables
-library(psych)
 
-#load data
-F0PCA<-read.csv("~/Dropbox/PHD/Snails/Analysis/F0PCA.csv")
+## are the treatments significantly different from one another?
 
-## Look at the correlations
-pairs.panels(F0PCA[,-5],
-             gap = 0,
-             bg = c("red", "yellow", "blue"), 
-             pch=21)
+#Load data
+Rooms <-read.csv("treatmenttest_long.csv")
 
+Treat_diff <- aov(Value ~ Treatment, data = Rooms)
+summary(Treat_diff)
 
-pca2 <-princomp(F0PCA)
+emmeans(Treat_diff, list(pairwise ~ Treatment), adjust = "tukey")
 
+#number of offspring tanks per combination
 
-PCAload <-loadings(pca2)
-print(PCAload, digits = 3, cutoff = 0, sort = FALSE)
+no.offspring.T <- F1 %>%
+  group_by(tank.ID) %>%
+  slice(1) %>%
+  ungroup()
 
-### Using the prcomp function as the proportion variance looks weird
-PCA3 <-prcomp(F0PCA, scale= TRUE)
-loadingsPCA3 <- PCA3$rotation
+no.offspring.T %>%
+  count(p.treat, o.treat)
 
-print(PCA3)
-variance <- PCA3$sdev^2
-prop_variance <- variance / sum(variance)
-print(prop_variance)
+# no. of eggs in every combination of treatments
 
-
+F1egg %>%
+  group_by(p.treat, o.treat) %>%
+  summarize(total_egg_no = sum(egg_no, na.rm = TRUE), .groups = "drop")
