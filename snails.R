@@ -17,7 +17,7 @@ library(MASS)
 library(glmmTMB)
 library(dplyr)
 library(car)
-
+library(parameters)
 
 #Load data
 F0<-read.csv("F0stacked.csv")
@@ -26,6 +26,15 @@ F1egg <-read.csv("F1egg.csv")
 
 F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
 F0$p.treat <- as.factor(F0$p.treat)
+F0$p.ID <- as.factor(F0$p.ID)
+F0$clutch.no <- as.factor(F0$clutch.no)
+
+F1$p.treat <- as.factor(F1$p.treat)
+F1$parent <- as.factor(F1$parent)
+F1$o.treat <- as.factor(F1$o.treat)
+
+
+
 
 #############################
 # plots for data exploration #
@@ -34,7 +43,7 @@ F0$p.treat <- as.factor(F0$p.treat)
 #Scatter plot by group
 #total no. of eggs x total mass area
 massegg <- F0 %>%
-ggplot(aes(x = totalegg, y = totalmass, color = p.treat)) +
+ggplot(aes(x = totalegg, y = mass.area, color = p.treat)) +
   geom_point()
 massegg
 
@@ -58,8 +67,8 @@ eggsizevnumber
 
 
 ## are egg size and egg number correlated (regardless of temp treatment)?
-
-simplePP <- glmmTMB(clutch.size ~ eggsize + (1|p.ID),  data = F0)
+F0 <- na.omit(F0)
+simplePP <- glmmTMB(clutch.size ~ eggsize,  data = F0)
 summary(simplePP)
 
 ## even without taking parental temperature into account, there is no relationship between egg size and total number of eggs
@@ -82,7 +91,7 @@ ggplot(data=cdata, aes(x=clutch, y=number, group=P.ID)) +
 ########################
 ##### Run the models #####
 ########################
-
+## average snail volume per treatment
 average_volume <- F0 %>%
   group_by(p.treat) %>%
   summarise(
@@ -90,7 +99,9 @@ average_volume <- F0 %>%
     sd_volume = sd(Volume_conesum, na.rm = TRUE),
     .groups = 'drop'
   )
-#But first z transform the volume of snail pair within treatment groups
+
+
+# z transform the volume of snail pair within treatment groups
 
 # Function to perform Z-transform within groups
 z_transform_within_group <- function(x) {
@@ -105,6 +116,8 @@ snail_volumez <- F0 %>%
   group_by(p.treat) %>%
   mutate(Volume_conesum = z_transform_within_group(Volume_conesum))
 
+F0$Volume_conesum <- as.numeric(F0$Volume_conesum)
+
 ###############################
 ## Parental fecundity models ##
 ###############################
@@ -115,20 +128,80 @@ snail_volumez <- F0 %>%
 TEdata<- snail_volumez %>% distinct(p.ID, .keep_all = TRUE)
 
 
-# Total number of eggs
-totaleggmod <- glmmTMB(totalegg ~ Volume_conesum + p.treat, 
+#### Total number of eggs #######
+totaleggmod <- glmmTMB(totalegg ~ Volume_conesum + p.treat + (1|p.ID), 
                        data = TEdata, 
-                       family = gaussian(link = "identity"))
+                       family = poisson)
 summary(totaleggmod)
 Anova(totaleggmod, type = "II")
-#nothing
+emmeans(totaleggmod, ~ p.treat)
+
+## work out percentage of random effects for a poisson model
+mean(TEdata$totalegg, na.rm = TRUE)
+
+# 1. Extract variance of the random effect (from your model summary)
+var_ID <- 0.2362
+
+# 2. Calculate the mean of totalegg
+mu <- mean(TEdata$totalegg, na.rm = TRUE)
+
+# 3. Approximate the residual variance for Poisson-log model
+var_resid <- log(1 + 1 / mu)
+
+# 4. Calculate ICC
+ICC <- var_ID / (var_ID + var_resid)
+
+# 5. Print result
+cat("Mean totalegg =", round(mu, 2), "\n")
+cat("Residual variance ≈", round(var_resid, 4), "\n")
+cat("ICC for p.ID ≈", round(ICC, 4), "or", round(ICC * 100, 1), "%\n")
+
+#P.ID = 87.1%
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(totaleggmod)
+resid_vals <- residuals(totaleggmod, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
 
 ## Use the full dataset
-# Egg size
-eggsizem <- glmmTMB(eggsize ~ Volume_conesum + p.treat + (1|p.ID), data = snail_volumez, family = gaussian(link = "identity"))
+############ Egg size ##############
+eggsizem <- glmmTMB(eggsize ~ Volume_conesum + p.treat + (1|p.ID) + (1|clutch.no), data = snail_volumez, family = gaussian(link = "identity"))
 summary(eggsizem)
 Anova(eggsizem, type = "II")
-#nothing
+
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(eggsizem)
+resid_vals <- residuals(eggsizem, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+## good
+
+emmeans(eggsizem, ~ p.treat)
+
+## Percentages of random effects ##
+p.ID    = 0.002097
+clutch  = 0.00008871
+resid   = 0.008804
+
+icc_pID = 0.002097 / (0.002097 + 0.00008871 + 0.008804)
+icc_clutch = 0.00008871 / (0.002097 + 0.00008871 + 0.008804)
+
+
+######### Egg size coefficient of variation #########
 
 #calculate the coefficient of variance from the SD and means
 
@@ -156,6 +229,40 @@ eggsizesdm <- glmmTMB(cv ~ Volume_conesum + p.treat + (1|p.ID), data = F0SD, fam
 summary(eggsizesdm)
 Anova(eggsizesdm, type = "II")
 #nothing
+diagnose(eggsizesdm)
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(eggsizesdm)
+resid_vals <- residuals(eggsizesdm, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+#good
+
+## Percent variance of random effects
+# Variance components
+var_ID <- 1.798
+var_resid <- 10.866
+
+# Total variance
+var_total <- var_ID + var_resid
+
+# ICC / proportion of variance due to p.ID
+ICC <- var_ID / var_total
+
+# result
+cat("Total variance:", round(var_total, 3), "\n")
+cat("ICC for p.ID =", round(ICC, 4), "or", round(ICC * 100, 1), "%\n")
+
+
+
+################ Clutch size###########################################
 
 snail_volumez$clutch.size <- as.numeric(snail_volumez$clutch.size)
 
@@ -166,37 +273,68 @@ CSdata <- snail_volumez %>%
 # Clutch size
 clutchm <- glmmTMB(clutch.size ~ Volume_conesum + p.treat + (1|p.ID), data = CSdata, family = gaussian(link = "identity"))
 summary(clutchm)
+
 Anova(clutchm, type = "II")
 # Parental treatment has a signficant p-value (P=0.02)
 
+# Extract fitted values and residuals
+fitted_vals <- fitted(clutchm)
+resid_vals <- residuals(clutchm, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# good
+
 #Post hoc test
 emmeans(clutchm, list(pairwise ~ p.treat), adjust = "tukey")
+emmeans(clutchm, ~ p.treat)
 
+## random effects as percentage variance ##
 
-residuals <- residuals(ave.clutchm)
-plot(fitted(ave.clutchm), residuals,
-     xlab = "Fitted Values",
-     ylab = "Residuals",
-     main = "Residual Plot")
+# Store variance components
+var_pID <- 2.816e-11
+var_clutch <- 0.003794
+var_residual <- 0.006636
 
+# Total variance
+total_var <- var_pID + var_clutch + var_residual
+
+# Percentages
+percent_pID <- 100 * var_pID / total_var
+percent_clutch <- 100 * var_clutch / total_var
+percent_residual <- 100 * var_residual / total_var
+
+# Print
+cat("Percent variance explained:\n")
+cat(sprintf("p.ID: %.4f%%\n", percent_pID))
+cat(sprintf("clutch.no: %.2f%%\n", percent_clutch))
+cat(sprintf("Residual: %.2f%%\n", percent_residual))
+
+TEdata <- na.omit(TEdata)
 
 # Latency to lay eggs
-latencym <- glmmTMB(egglatency ~ Volume_conesum + p.treat, data = TEdata, family = gaussian(link = "identity"))
+latencym <- glmmTMB(egglatency ~ Volume_conesum + p.treat + (1|p.ID), data = TEdata, family = gaussian(link = "identity"))
 summary(latencym)
 Anova(latencym, type = "II")
 #nothing
 
-#number of clutches
+# Extract fitted values and residuals
+fitted_vals <- fitted(latencym)
+resid_vals <- residuals(latencym, type = "pearson")
 
-clutchn_mod <- glmmTMB(clutches ~ Volume_conesum + p.treat, 
-                       data = TEdata, 
-                       family = gaussian(link = "identity"))
-
-summary(clutchn)
-Anova(clutchn_mod, type = "II")
-
-
-
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
 
 
 
@@ -208,16 +346,56 @@ F1$tank.ID <- as.factor(F1$tank.ID)
 
 
 #Survival
-survivalmod <- glmmTMB(cbind(hatched, unhatched) ~ p.treat * o.treat + (1| parent) + (1 | tank.ID), 
+survivalmod <- glmmTMB(cbind(hatched, unhatched) ~ p.treat * o.treat + (1| parent) + (1|tank.ID), 
                        data = F1, 
                        family = binomial)
                      
 summary(survivalmod)
 Anova(survivalmod, type = "II")
 
+# Extract fitted values and residuals
+fitted_vals <- fitted(survivalmod)
+resid_vals <- residuals(survivalmod, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
 #Post hoc test
 emmeans(survivalmod, pairwise ~ o.treat, adjust = "tukey")
 
+#Calculate percent change between o.treat levels
+emmeans(survivalmod, ~ o.treat, type = "response")
+
+## calculate percent variance explained by random effects
+
+# Variance components
+var_parent <- 0.5184
+var_tank <- 4.0061
+
+# Fixed residual variance on the latent scale for logistic models
+var_residual <- (pi^2) / 3  # ≈ 3.29
+
+# Total variance on the latent scale
+var_total <- var_parent + var_tank + var_residual
+
+# Percent variance explained
+percent_parent <- (var_parent / var_total) * 100
+percent_tank <- (var_tank / var_total) * 100
+percent_residual <- (var_residual / var_total) * 100
+
+# Combine into a data frame for display
+variance_summary <- data.frame(
+  Component = c("parent", "tank.ID", "Residual"),
+  Variance = c(var_parent, var_tank, var_residual),
+  Percent = round(c(percent_parent, percent_tank, percent_residual), 2)
+)
+
+print(variance_summary)
 
 #Work out the sample sizes for each o.treat
 
@@ -241,7 +419,45 @@ IDmod <- glmmTMB(ID ~ p.treat * o.treat + (1 | parent),
                  data = F1_ID, 
                  family = gaussian(link = "identity"))
 summary(IDmod)
-Anova(IDmod, type = "II")  # or type = "III"
+Anova(IDmod, type = "II")  
+
+#calculate percent change
+emmeans(IDmod, ~ o.treat)
+
+#calculate the percentage variance explained by random effects
+
+# Variance components 
+var_parent <- 0.2177
+var_residual <- 3.9428
+
+# Total variance
+var_total <- var_parent + var_residual
+
+# Percent variance explained
+percent_parent <- (var_parent / var_total) * 100
+percent_residual <- (var_residual / var_total) * 100
+
+# Combine into a data frame
+variance_summary <- data.frame(
+  Component = c("parent", "Residual"),
+  Variance = c(var_parent, var_residual),
+  Percent = round(c(percent_parent, percent_residual), 2)
+)
+
+print(variance_summary)
+
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(IDmod)
+resid_vals <- residuals(IDmod, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
 
 #Offsprintg treatment significant, pvalue =tiny
 
@@ -255,7 +471,7 @@ Sizedata <- F1 %>%
   filter(!is.na(offspring.size)) %>%
   distinct(tank.ID, offspring.size, .keep_all = TRUE)
 
-## Offspring size model
+#### Offspring size model ####
 
 sizemod <- glmmTMB(offspring.size ~ p.treat * o.treat + eggsize + (1 | parent) + (1 | tank.ID), 
                    data = Sizedata, 
@@ -263,6 +479,44 @@ sizemod <- glmmTMB(offspring.size ~ p.treat * o.treat + eggsize + (1 | parent) +
 
 summary(sizemod)
 Anova(sizemod, type = "II")
+
+#calculate percent change
+emmeans(sizemod, ~ o.treat)
+
+# calculate percentage variance of random effects
+# Variance components from the model
+var_parent <- 1.437e-11
+var_tank <- 1.327e-03
+var_residual <- 3.988e-03
+
+# Total variance
+var_total <- var_parent + var_tank + var_residual
+
+# Percent variance explained
+percent_parent <- (var_parent / var_total) * 100
+percent_tank <- (var_tank / var_total) * 100
+percent_residual <- (var_residual / var_total) * 100
+
+# Combine into a table
+variance_summary <- data.frame(
+  Component = c("parent", "tank.ID", "Residual"),
+  Variance = c(var_parent, var_tank, var_residual),
+  Percent = round(c(percent_parent, percent_tank, percent_residual), 4)
+)
+
+print(variance_summary)
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(sizemod)
+resid_vals <- residuals(sizemod, type = "pearson")
+
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
 
 
 offspring_count <- Sizedata %>%
@@ -304,14 +558,44 @@ F1SDU <- data_merged %>%
 #Size variation (coefficient of variation)
 
 
-sizevmod <- glmmTMB(cv ~ p.treat * o.treat + (1 | parent), 
+sizevmod <- glmmTMB(cv ~ p.treat * o.treat + (1 | parent),
                     data = F1SDU, 
                     family = gaussian(link = "identity"))
 summary(sizevmod)
 Anova(sizevmod, type = "II")
 # nothing
+# Extract fitted values and residuals
+fitted_vals <- fitted(sizevmod)
+resid_vals <- residuals(sizvemod, type = "pearson")
 
+# Residuals vs. Fitted plot
+ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals), 
+       aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Plot", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
 
+#calculating the percentage of variance explained by random effects
+# Variance components from the model
+var_parent <- 2.508
+var_residual <- 9.551
+
+# Total variance
+var_total <- var_parent + var_residual
+
+# Percent variance explained
+percent_parent <- (var_parent / var_total) * 100
+percent_residual <- (var_residual / var_total) * 100
+
+# Combine into a table
+variance_summary <- data.frame(
+  Component = c("parent", "Residual"),
+  Variance = c(var_parent, var_residual),
+  Percent = round(c(percent_parent, percent_residual), 2)
+)
+
+print(variance_summary)
 
 #######################################
 ########       Graphics     ##########
@@ -344,12 +628,13 @@ osize
 #ID plot
 
 IDplot <- F1_ID %>%
-  ggplot(aes(x=p.treat, y=ID, fill=factor(o.treat))) +
+  ggplot(aes(x = p.treat, y = ID, fill = factor(o.treat))) +
   ylab(bquote('Incubation duration'~(days))) +
-  labs(x="Parental Treatment", title= "", fill="Developmental\ntreatment") +
-  scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  labs(x = "Parental Treatment", title = "", fill = "Developmental\ntreatment") +
+  scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   geom_boxplot() +
+  scale_y_continuous(breaks = seq(floor(min(F1_ID$ID)), ceiling(max(F1_ID$ID)), by = 2)) + # Adjust as needed
   theme_bw() +
   theme(
     panel.grid.minor = element_blank(),
@@ -360,6 +645,7 @@ IDplot <- F1_ID %>%
     legend.text = element_text(size = 16),
     legend.title = element_text(size = 18)
   )
+
 IDplot
 
 
@@ -401,7 +687,7 @@ ggarrange(IDplot, osize,
 clutchplot <- F0 %>%
   ggplot(aes(x = p.treat, y = clutch.size, fill = factor(p.treat))) +
   geom_boxplot() +
-  ylab(bquote("Clutch size")) +
+  ylab(bquote("Clutch size (no. of eggs)")) +
   labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
@@ -419,7 +705,7 @@ clutchplot
 eggsizeplot <- F0 %>%
   ggplot(aes(x = p.treat, y = eggsize, fill = factor(p.treat))) +
   geom_boxplot() +
-  ylab(bquote("Egg size")) +
+  ylab(bquote("Egg size (mm)")) +
   labs(x = "Parental treatment") +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
@@ -434,7 +720,7 @@ eggsizeplot <- F0 %>%
         legend.title = element_text(size = 18)) 
 eggsizeplot
 
-# GGarrange, I think while we found nothing for the trade off between egg size and clutch size
+# GGarrange, while we found nothing for the trade off between egg size and clutch size
 #its a major theme throughout.
 
 ggarrange(eggsizeplot, clutchplot, 
@@ -445,41 +731,34 @@ ggarrange(eggsizeplot, clutchplot,
 
 #Grouped scatterplot?
 
+#average offspring size per tank
+avg_offspring_size <- F1 %>%
+  group_by(tank.ID) %>%
+  summarise(mean_offspring_size = mean(offspring.size, na.rm = TRUE))
+
+F1 <- F1 %>%
+  group_by(tank.ID) %>%
+  mutate(mean_offspring_size = mean(offspring.size, na.rm = TRUE))
 
 
-scatterbw <- F1 %>%
-  ggplot(aes(x = eggsize, y = avg_offspring_size)) +
-  geom_point(aes(shape = o.treat, color= o.treat), size = 3.5) +
-  scale_shape_manual(values = c(16,19,1), name= "Developmental\ntreatment",
-                     labels=c("Cold", "Fluctuating", "Hot")) +
-  scale_color_manual(values = c("black", "grey", "black"), name= "Developmental\ntreatment",
-                     labels=c("Cold", "Fluctuating", "Hot"))+
-  ylab(bquote('Average offspring size'~(mm))) +
-  labs(x="Average egg size"~(mm)) +
+scatterbw <- ggplot(F1_clean, aes(x = eggsize, y = mean_offspring_size)) +
+  geom_point(aes(shape = o.treat, color = o.treat), size = 3.5) +
+  scale_shape_manual(values = c(16, 19, 1), name = "Developmental\ntreatment",
+                     labels = c("Cold", "Fluctuating", "Hot")) +
+  scale_color_manual(values = c("black", "grey", "black"), name = "Developmental\ntreatment",
+                     labels = c("Cold", "Fluctuating", "Hot")) +
+  ylab(bquote('Average offspring size' ~ (mm))) +
+  labs(x = "Average egg size" ~ (mm)) +
   theme_bw() +
-  theme(    axis.text = element_text(size = 14),
-            axis.title = element_text(size = 16),
-            plot.title = element_text(size = 18),
-            legend.text = element_text(size = 16),
-            legend.title = element_text(size = 18))
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(size = 18)) +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +  # Add regression line
+  annotate("text", x = max(F1_clean$eggsize) * 0.96, y = max(F1_clean$mean_offspring_size) * 0.95,  # Move label to right
+           label = paste("R² =", R2_value, "\n", p_label), size = 4, hjust = 0)
 scatterbw
-
-## a colour plot
-
-scattercol <- F1 %>%
-  ggplot(aes(x = size.ave, y = ave.eggsize)) +
-  geom_point(aes(color= o.treat), size = 3.5) +
-  ylab(bquote('Average egg size'~(mm))) +
-  labs(x="Average offspring size"~(mm)) +
-  scale_color_manual(values = c("#2EB5F3", "#C885E8", "#F06423"), name= "Parental treatment",
-                     labels=c("Cold", "Fluctuating", "Hot"))+
-  theme_bw() +
-  theme(legend.title = element_text(size=17), legend.text = element_text(size=15), axis.text=element_text(size=12),axis.title=element_text(size=12))
-scattercol
-
-
-
-
 
 
 ## Trying to figure out what is going with the size measurements
@@ -551,8 +830,10 @@ merged_data <- merge(dfs.mean, summary_data, by = c("p.treat", "o.treat"), all.x
 
 ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=o.treat)) +
   geom_line() +
-  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", size=1) +
-  geom_point(aes(colour=o.treat, fill=o.treat), size=5, stroke=1) + 
+  geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", 
+                size=1, position = position_dodge(width = 0.1)) +
+  geom_point(aes(colour=o.treat, fill=o.treat), size=5, stroke=1, 
+             position = position_dodge(width = 0.1)) + 
   scale_shape_manual(values=c(21, 21, 21),
                      name="Developmental\ntreatment",
                      labels=c("Cold", "Fluctuating", "Hot")) +
@@ -562,7 +843,7 @@ ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=
   scale_colour_manual(values=c("black", "black", "black"),  # Border colors
                       name="Developmental\ntreatment",
                       labels=c("Cold", "Fluctuating", "Hot")) +
-  ylab(bquote('Proportion survived')) +
+  ylab(bquote('Hatching succcess')) +
   labs(x="Parental treatment", title="") +
   scale_x_discrete(labels=c("Cold", "Fluctuating", "Hot")) +
   theme_bw() +
@@ -571,6 +852,42 @@ ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=
         axis.text = element_text(size=14),
         axis.title = element_text(size=16))
  
+
+
+
+ggplot(data = merged_data, aes(x = p.treat, y = survival_rate.x, group = o.treat, shape = o.treat)) + 
+  geom_line() + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), 
+                width = 0.2, 
+                colour = "black", 
+                size = 1, 
+                position = position_jitter(width = 0.1)) +  # Add jitter to CI
+  geom_jitter(aes(colour = o.treat, fill = o.treat), 
+              size = 5, 
+              stroke = 1, 
+              width = 0.1) +  # Add jitter to points
+  scale_shape_manual(values = c(21, 21, 21),
+                     name = "Developmental\ntreatment", 
+                     labels = c("Cold", "Fluctuating", "Hot")) +
+  scale_fill_manual(values = c("black", "grey", "white"),   
+                    name = "Developmental\ntreatment", 
+                    labels = c("Cold", "Fluctuating", "Hot")) +
+  scale_colour_manual(values = c("black", "black", "black"),  # Border colors
+                      name = "Developmental\ntreatment", 
+                      labels = c("Cold", "Fluctuating", "Hot")) +
+  ylab(bquote('Proportion hatched')) + 
+  labs(x = "Parental treatment", title = "") + 
+  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) + 
+  theme_bw() + 
+  theme(legend.title = element_text(size = 18), 
+        legend.text = element_text(size = 16), 
+        axis.text = element_text(size = 14), 
+        axis.title = element_text(size = 16))
+
+
+
+
+
 
 
 
