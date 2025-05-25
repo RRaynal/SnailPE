@@ -18,6 +18,7 @@ library(glmmTMB)
 library(dplyr)
 library(car)
 library(parameters)
+library(cowplot)
 
 #Load data
 F0<-read.csv("F0stacked.csv")
@@ -344,6 +345,9 @@ ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals),
 F1$parent <- as.factor(F1$parent)
 F1$tank.ID <- as.factor(F1$tank.ID)
 
+#sample size of each treatment combination
+F1 %>%
+  count(p.treat, o.treat)
 
 #Survival
 survivalmod <- glmmTMB(cbind(hatched, unhatched) ~ p.treat * o.treat + (1| parent) + (1|tank.ID), 
@@ -413,13 +417,17 @@ F1_ID <- F1 %>%
   drop_na(ID) %>%
   droplevels()
 
-
+#sample size of each treatment combination
+F1_ID %>%
+  count(p.treat, o.treat)
 
 IDmod <- glmmTMB(ID ~ p.treat * o.treat + (1 | parent), 
                  data = F1_ID, 
                  family = gaussian(link = "identity"))
 summary(IDmod)
 Anova(IDmod, type = "II")  
+
+
 
 #calculate percent change
 emmeans(IDmod, ~ o.treat)
@@ -470,6 +478,10 @@ emmeans(IDmod, list(pairwise ~ p.treat), adjust = "tukey")
 Sizedata <- F1 %>%
   filter(!is.na(offspring.size)) %>%
   distinct(tank.ID, offspring.size, .keep_all = TRUE)
+
+#sample size of each treatment combination
+Sizedata %>%
+  count(p.treat, o.treat)
 
 #### Offspring size model ####
 
@@ -554,6 +566,9 @@ F1SDU <- data_merged %>%
   distinct(tank.ID, cv, .keep_all = TRUE)%>%
   filter(!is.na(cv))
 
+#sample size of each treatment combination
+F1SDU %>%
+  count(p.treat, o.treat)
 
 #Size variation (coefficient of variation)
 
@@ -608,7 +623,7 @@ print(variance_summary)
 osize <- F1 %>%
   ggplot(aes(x=p.treat, y=offspring.size, fill=factor(o.treat))) +
   ylab(bquote('Offspring size'~(mm))) +
-  labs(x="Parental Treatment", title= "", fill="Developmental\ntreatment") +
+  labs(x="Parental Treatment", title= "", fill="Developmental treatment") +
   scale_fill_manual(values=c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
@@ -617,20 +632,76 @@ osize <- F1 %>%
   theme(
     panel.grid.minor = element_blank(),
     panel.grid.major = element_blank(),
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 16),
-    plot.title = element_text(size = 18),
-    legend.text = element_text(size = 16),
-    legend.title = element_text(size = 18)
-  )
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.position = "none")
 osize
 
-#ID plot
+
+osizeo <- F1 %>%
+  ggplot(aes(x=o.treat, y=offspring.size, fill=factor(o.treat))) +
+  ylab(bquote('')) +
+  labs(x="Developmental Treatment", title= "", fill="Developmental\ntreatment") +
+  scale_fill_manual(values=c("black", "black", "black"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
+  scale_x_discrete(labels = c("C", "F", "H")) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.position = "none")
+osizeo
+
+osizep <- F1 %>%
+  ggplot(aes(x=p.treat, y=offspring.size, fill=factor(p.treat))) +
+  ylab(bquote('')) +
+  labs(x="Parental Treatment", title= "", fill="Parental\ntreatment") +
+  scale_fill_manual(values=c("black", "black", "black"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_y_continuous(expand=c(0.0,0.0), limits=c(0.6, 1)) +
+  scale_x_discrete(labels = c("C", "F", "H")) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.position = "none")
+osizep
+
+
+# Arrange B and C without legend
+Bo_Co <- ggarrange(osizep, osizeo,
+                 labels = c("B", "C"),
+                 ncol = 2,
+                 common.legend = FALSE)
+
+# Combine A and (B+C), with A holding the legend
+plot_grid(osize, Bo_Co,
+          labels = c("A", ""),
+          ncol = 2,
+          rel_widths = c(2, 2))
+
+
+
+#ID plot combined
 
 IDplot <- F1_ID %>%
   ggplot(aes(x = p.treat, y = ID, fill = factor(o.treat))) +
   ylab(bquote('Incubation duration'~(days))) +
-  labs(x = "Parental Treatment", title = "", fill = "Developmental\ntreatment") +
+  labs(x = "Parental Treatment", title = "", fill = "Developmental treatment") +
   scale_fill_manual(values = c("#4e5154", "#ced1d6", "white"), labels = c("Cold", "Fluctuating", "Hot")) + 
   scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) +
   geom_boxplot() +
@@ -639,17 +710,72 @@ IDplot <- F1_ID %>%
   theme(
     panel.grid.minor = element_blank(),
     panel.grid.major = element_blank(),
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 16),
-    plot.title = element_text(size = 18),
-    legend.text = element_text(size = 16),
-    legend.title = element_text(size = 18)
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.position = "top"
   )
 
 IDplot
 
 
+#IDplot offspring only
 
+IDO <- F1_ID %>%
+  ggplot(aes(x = o.treat, y = ID, fill = factor(o.treat))) +
+  ylab(bquote('')) +
+  labs(x = "Developmental Treatment", title = "") +
+  scale_fill_manual(values = c("black", "black", "black"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_x_discrete(labels = c("C", "F", "H")) +
+  geom_boxplot() +
+  scale_y_continuous(breaks = seq(floor(min(F1_ID$ID)), ceiling(max(F1_ID$ID)), by = 2)) + # Adjust as needed
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.position = "none")
+IDO
+
+#IDplot developmental 
+
+IDP <- F1_ID %>%
+  ggplot(aes(x = p.treat, y = ID, fill = factor(p.treat))) +
+  ylab(bquote('')) +
+  labs(x = "Parental Treatment", title = "") +
+  scale_fill_manual(values = c("black", "black", "black"), labels = c("Cold", "Fluctuating", "Hot")) + 
+  scale_x_discrete(labels = c("C", "F", "H")) +
+  geom_boxplot() +
+  scale_y_continuous(breaks = seq(floor(min(F1_ID$ID)), ceiling(max(F1_ID$ID)), by = 2)) + # Adjust as needed
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 14),
+    legend.position = "none")
+IDP
+
+
+# Arrange B and C without legend
+B_C <- ggarrange(IDP, IDO,
+                 labels = c("B", "C"),
+                 ncol = 2,
+                 common.legend = FALSE)
+
+# Combine A and (B+C), with A holding the legend
+plot_grid(IDplot, B_C,
+          labels = c("A", ""),
+          ncol = 2,
+          rel_widths = c(2, 2))
+
+
+#offspring size SV
 sizesd <- F1SDU %>%
   ggplot(aes(x = p.treat, y = cv, fill = factor(o.treat))) +
   ylab(bquote('Offspring Coefficient of variation')) +
@@ -672,13 +798,11 @@ sizesd
 
 
 
-## These were my predictions when investigating the interaction between parental x offspring environment,
-## so arrange these into a panel plot
 
-ggarrange(IDplot, osize, 
-          labels = c("A", "B"),
-          common.legend = TRUE, legend = "right", align = "v",
-          ncol = 2, nrow = 1)
+
+
+
+
 
 
 
@@ -729,7 +853,6 @@ ggarrange(eggsizeplot, clutchplot,
 
 ## Show the relationship we found between offspring treatment, egg size and offspring size
 
-#Grouped scatterplot?
 
 #average offspring size per tank
 avg_offspring_size <- F1 %>%
@@ -797,7 +920,7 @@ TukeyHSD(snailvol2, "p.treat")
 
 
 
-#try grouping by catagories within columns
+#try grouping by categories within columns
 #Group by mean of multiple columns
 
 dfs.mean <- F1 %>%
