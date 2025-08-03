@@ -378,8 +378,8 @@ emmeans(survivalmod, ~ o.treat, type = "response")
 ## calculate percent variance explained by random effects
 
 # Variance components
-var_parent <- 0.5184
-var_tank <- 4.0061
+var_parent <- 0.5147
+var_tank <- 4.0393
 
 # Fixed residual variance on the latent scale for logistic models
 var_residual <- (pi^2) / 3  # ≈ 3.29
@@ -435,8 +435,8 @@ emmeans(IDmod, ~ o.treat)
 #calculate the percentage variance explained by random effects
 
 # Variance components 
-var_parent <- 0.2177
-var_residual <- 3.9428
+var_parent <- 0.1728
+var_residual <- 2.6773
 
 # Total variance
 var_total <- var_parent + var_residual
@@ -492,14 +492,17 @@ sizemod <- glmmTMB(offspring.size ~ p.treat * o.treat + eggsize + (1 | parent) +
 summary(sizemod)
 Anova(sizemod, type = "II")
 
+
 #calculate percent change
 emmeans(sizemod, ~ o.treat)
 
+emmeans(sizemod, pairwise ~ o.treat)
+
 # calculate percentage variance of random effects
 # Variance components from the model
-var_parent <- 1.437e-11
-var_tank <- 1.327e-03
-var_residual <- 3.988e-03
+var_parent <- 1.063e-11
+var_tank <- 1.313e-03
+var_residual <- 3.987e-03
 
 # Total variance
 var_total <- var_parent + var_tank + var_residual
@@ -593,8 +596,8 @@ ggplot(data = data.frame(Fitted = fitted_vals, Residuals = resid_vals),
 
 #calculating the percentage of variance explained by random effects
 # Variance components from the model
-var_parent <- 2.508
-var_residual <- 9.551
+var_parent <- 2.985
+var_residual <- 9.176
 
 # Total variance
 var_total <- var_parent + var_residual
@@ -715,7 +718,7 @@ IDplot <- F1_ID %>%
     plot.title = element_text(size = 14),
     legend.text = element_text(size = 12),
     legend.title = element_text(size = 14),
-    legend.position = "top"
+    legend.position = "none"
   )
 
 IDplot
@@ -950,7 +953,7 @@ summary_data <- summary_data %>%
 # Merge summary_data with dfs.mean based on p.treat and o.treat
 merged_data <- merge(dfs.mean, summary_data, by = c("p.treat", "o.treat"), all.x = TRUE)
 
-
+## Survival plot
 ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=o.treat)) +
   geom_line() +
   geom_errorbar(aes(ymin=lower_ci, ymax=upper_ci), width=0.2, colour="black", 
@@ -977,35 +980,6 @@ ggplot(data=merged_data, aes(x=p.treat, y=survival_rate.x, group=o.treat, shape=
  
 
 
-
-ggplot(data = merged_data, aes(x = p.treat, y = survival_rate.x, group = o.treat, shape = o.treat)) + 
-  geom_line() + 
-  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), 
-                width = 0.2, 
-                colour = "black", 
-                size = 1, 
-                position = position_jitter(width = 0.1)) +  # Add jitter to CI
-  geom_jitter(aes(colour = o.treat, fill = o.treat), 
-              size = 5, 
-              stroke = 1, 
-              width = 0.1) +  # Add jitter to points
-  scale_shape_manual(values = c(21, 21, 21),
-                     name = "Developmental\ntreatment", 
-                     labels = c("Cold", "Fluctuating", "Hot")) +
-  scale_fill_manual(values = c("black", "grey", "white"),   
-                    name = "Developmental\ntreatment", 
-                    labels = c("Cold", "Fluctuating", "Hot")) +
-  scale_colour_manual(values = c("black", "black", "black"),  # Border colors
-                      name = "Developmental\ntreatment", 
-                      labels = c("Cold", "Fluctuating", "Hot")) +
-  ylab(bquote('Proportion hatched')) + 
-  labs(x = "Parental treatment", title = "") + 
-  scale_x_discrete(labels = c("Cold", "Fluctuating", "Hot")) + 
-  theme_bw() + 
-  theme(legend.title = element_text(size = 18), 
-        legend.text = element_text(size = 16), 
-        axis.text = element_text(size = 14), 
-        axis.title = element_text(size = 16))
 
 
 
